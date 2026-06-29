@@ -80,7 +80,7 @@ public class ExternalUserInfo {
       cf = CertificateFactory.getInstance("X.509");
       X509Certificate cert = (X509Certificate) cf.generateCertificate(bais);
 
-      //TODO will man das wie früher im webservice konfigurierbar machen, welche daten aus dem zertifikat ausgelesen werden?
+      //TODO will man das wie frï¿½her im webservice konfigurierbar machen, welche daten aus dem zertifikat ausgelesen werden?
       BigInteger serialnumber = cert.getSerialNumber();
       String dnName = cert.getSubjectDN().getName();
       LdapName ldapname;
@@ -101,6 +101,37 @@ public class ExternalUserInfo {
     }
   }
 
+  public static ExternalUserInfo createFromJWT(String jwt) {
+    if (jwt == null || jwt.isEmpty()) {
+        return null;
+    }
+
+    // Split the JWT into its components: header, payload, and signature
+    String[] parts = jwt.split("\\.");
+    if (parts.length != 3) {
+        return null;
+    }
+
+    // Decode the payload (Base64 URL-decoded)
+    String payload = new String(java.util.Base64.getUrlDecoder().decode(parts[1]));
+
+    // Extract the email claim from the payload
+    String emailKey = "\"email\":\"";
+    int emailStart = payload.indexOf(emailKey);
+    if (emailStart == -1) {
+        return null;
+    }
+
+    emailStart += emailKey.length();
+    int emailEnd = payload.indexOf("\"", emailStart);
+    if (emailEnd == -1) {
+        return null;
+    }
+
+    String email = payload.substring(emailStart, emailEnd);
+    String user_displayname = email.substring(0, email.indexOf('@'));
+    return new ExternalUserInfo(email, user_displayname, jwt);
+  }
 
   private static String getFromLdapName(LdapName ldapname, String key) {
     for (Rdn rdn : ldapname.getRdns()) {

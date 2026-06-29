@@ -20,6 +20,7 @@ package com.gip.xyna.xfmg.xopctrl.usermanagement;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 import com.gip.xyna.CentralFactoryLogging;
 import com.gip.xyna.XynaFactory;
@@ -39,6 +40,7 @@ import com.gip.xyna.xfmg.xopctrl.usermanagement.ldap.LDAPServer;
 import com.gip.xyna.xfmg.xopctrl.usermanagement.ldap.LDAPUserAuthentication;
 import com.gip.xyna.xfmg.xopctrl.usermanagement.ldap.SSLKeyAndTruststoreParameter;
 import com.gip.xyna.xfmg.xopctrl.usermanagement.ldap.SSLKeystoreParameter;
+import com.gip.xyna.xfmg.xopctrl.usermanagement.jwt.*;
 import com.gip.xyna.xnwh.exceptions.XNWH_OBJECT_NOT_FOUND_FOR_PRIMARY_KEY;
 
 
@@ -169,8 +171,73 @@ public enum DomainType {
       }
       return sslBuilder.instance();
     }
+  },
+  JWT("JWT") {
+
+    @Override
+    public JWTUserAuthentication generateAuthenticationMethod(Domain domain) {
+      return new JWTUserAuthentication((JWTDomainSpecificData) domain.getDomainSpecificData());
+    }
+
+    @Override
+    public JWTDomainSpecificData generateDomainTypeSpecificData(Map<String, List<String>> specifics) {
+      List<String> trustedIssuers = specifics.get("trustedIssuers");
+      if (trustedIssuers == null || trustedIssuers.isEmpty()) {
+        throw new IllegalArgumentException("No trusted issuers provided for JWT domain!");
+      }
+      List<String> intendedAudience = specifics.get("intendedAudience");
+      if (intendedAudience == null || intendedAudience.isEmpty()) {
+        throw new IllegalArgumentException("No intended audience provided for JWT domain!");
+      }
+      List<String> jwksUriList = specifics.get("jwksUri");
+      Optional<String> jwksUri = (jwksUriList != null && !jwksUriList.isEmpty())
+          ? Optional.of(jwksUriList.get(0))
+          : Optional.empty();
+      List<String> rolePrefixList = specifics.get("rolePrefix");
+      Optional<String> rolePrefix = (rolePrefixList != null && !rolePrefixList.isEmpty())
+          ? Optional.of(rolePrefixList.get(0))
+          : Optional.empty();
+      List<String> roleSuffixList = specifics.get("roleSuffix");
+      Optional<String> roleSuffix = (roleSuffixList != null && !roleSuffixList.isEmpty())
+          ? Optional.of(roleSuffixList.get(0))
+          : Optional.empty();
+      List<String> roleOrder = specifics.get("roleOrder");
+      if (roleOrder != null) {
+        List<String> cleanedRoleOrder = new ArrayList<String>();
+        for (String role : roleOrder) {
+          if (role != null) {
+            String trimmedRole = role.trim();
+            if (!trimmedRole.isEmpty()) {
+              cleanedRoleOrder.add(trimmedRole);
+            }
+          }
+        }
+        roleOrder = cleanedRoleOrder;
+      }
+      List<String> roleClaimPathList = specifics.get("roleClaimPath");
+      Optional<String> roleClaimPath = (roleClaimPathList != null && !roleClaimPathList.isEmpty())
+          ? Optional.of(roleClaimPathList.get(0))
+          : Optional.empty();
+      List<String> defaultRoleList = specifics.get("defaultRole");
+      Optional<String> defaultRole = (defaultRoleList != null && !defaultRoleList.isEmpty())
+          ? Optional.of(defaultRoleList.get(0))
+          : Optional.empty();
+
+      JWTDomainSpecificData.AuthValidationMode authValidationMode = JWTDomainSpecificData.AuthValidationMode.JWT;
+      List<String> validationModeList = specifics.get("authValidationMode");
+      if (validationModeList != null && !validationModeList.isEmpty()) {
+        try {
+          authValidationMode = JWTDomainSpecificData.AuthValidationMode.valueOf(validationModeList.get(0).trim().toUpperCase());
+        } catch (IllegalArgumentException e) {
+          throw new IllegalArgumentException("Invalid authValidationMode: '" + validationModeList.get(0)
+              + "'. Allowed values: JWT or HEADER.");
+        }
+      }
+
+      return new JWTDomainSpecificData(trustedIssuers, intendedAudience, roleClaimPath, defaultRole,
+          rolePrefix, roleSuffix, roleOrder, jwksUri, authValidationMode);
+    }
   };
-  
 
 
   private final String name;
