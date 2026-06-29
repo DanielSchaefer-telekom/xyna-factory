@@ -18,6 +18,8 @@ import java.net.http.HttpResponse;
 import java.security.Key;
 import java.time.Duration;
 import java.util.List;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -32,6 +34,8 @@ public class OIDCSigningKeyResolver implements Locator<Key> {
 
     private final JWTDomainSpecificData domainSpecificData;
     private volatile JwkProvider jwkProvider;
+    private final Map<String, Key> keyCache = new ConcurrentHashMap<>();
+    private volatile long keyCacheExpiryMs = 0L;
 
     public OIDCSigningKeyResolver(JWTDomainSpecificData domainSpecificData) {
         this.domainSpecificData = domainSpecificData;
@@ -39,10 +43,22 @@ public class OIDCSigningKeyResolver implements Locator<Key> {
 
     @Override
     public Key locate(Header header) {
-        String kid = (header instanceof ProtectedHeader) ? ((ProtectedHeader) header).getKeyId() : null;
+        String kid = (header instanceof ProtectedHeader) ? ((ProtectedHeader) header).getKeyId() : "";
         try {
-            Jwk jwk = getOrCreateProvider().get(kid);
-            return jwk.getPublicKey();
+            long now = System.currentTimeMillis();
+            if (now > keyCacheExpiryMs) {
+                keyCache.clear();
+                keyCacheExpiryMs = now + TimeUnit.HOURS.toMillis(24);
+                logger.debug("JWK key cache cleared/reset.");
+            }
+            return keyCache.computeIfAbsent(kid, k -> {
+                try {
+                    Jwk jwk = getOrCreateProvider().get(k.isEmpty() ? null : k);
+                    return jwk.getPublicKey();
+                } catch (Exception e) {
+                    throw new IllegalStateException("Failed to fetch JWK for kid='" + k + "'", e);
+                }
+            });
         } catch (Exception e) {
             throw new IllegalStateException("No matching key found in JWKS for kid='" + kid + "'", e);
         }
@@ -52,7 +68,7 @@ public class OIDCSigningKeyResolver implements Locator<Key> {
         if (jwkProvider == null) {
             String jwksUri = resolveJwksUri();
             jwkProvider = new JwkProviderBuilder(new URL(jwksUri))
-                    .cached(10, 24, TimeUnit.HOURS)
+                    .cached(false)
                     .rateLimited(false)
                     .build();
             logger.info("JwkProvider initialized for: " + jwksUri);
