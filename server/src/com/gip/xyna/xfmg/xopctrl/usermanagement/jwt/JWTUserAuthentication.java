@@ -90,16 +90,15 @@ public class JWTUserAuthentication extends UserAuthentificationMethod {
                 logger.debug("rolePrefix: " + rolePrefix);
                 logger.debug("roleSuffix: " + roleSuffix);
 
-                logger.debug("roleOrder: " + domainSpecificData.getRoleOrder().orElse(""));
-
-                logger.debug("rolePath: " + domainSpecificData.getRoleClaimPath().orElse("roles"));
+                List<String> roleOrder = domainSpecificData.getRoleOrder();
+                logger.debug("roleOrder: " + (roleOrder != null && !roleOrder.isEmpty() ? roleOrder : "Not Configured"));
 
                 // set roleClaimPath or use default "roles"
                 String roleClaimPath = domainSpecificData.getRoleClaimPath().orElse("roles");
-                role = extractRoleFromClaims(claimsMap, roleClaimPath, rolePrefix, roleSuffix,
-                        domainSpecificData.getRoleOrder());
-                logger.debug("role after normalization/order: " + role);
+                logger.debug("rolePath: " + roleClaimPath);
 
+                role = extractRoleFromClaims(claimsMap, roleClaimPath, rolePrefix, roleSuffix, roleOrder);
+                logger.debug("role after normalization/order: " + role);
             }
 
             if (role == null) {
