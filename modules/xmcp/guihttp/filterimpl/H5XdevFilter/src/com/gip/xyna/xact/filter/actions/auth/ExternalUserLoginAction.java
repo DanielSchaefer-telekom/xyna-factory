@@ -21,7 +21,6 @@ package com.gip.xyna.xact.filter.actions.auth;
 
 import java.rmi.RemoteException;
 import java.security.cert.CertificateException;
-import java.util.List;
 import org.apache.log4j.Logger;
 
 import com.gip.xyna.CentralFactoryLogging;
@@ -29,7 +28,6 @@ import com.gip.xyna.XynaFactory;
 import com.gip.xyna.utils.collections.Optional;
 import com.gip.xyna.utils.collections.Pair;
 import com.gip.xyna.utils.exceptions.XynaException;
-import com.gip.xyna.utils.misc.JsonBuilder;
 import com.gip.xyna.xact.filter.FilterAction;
 import com.gip.xyna.xact.filter.HTMLBuilder.HTMLPart;
 import com.gip.xyna.xact.filter.JsonFilterActionInstance;
@@ -43,11 +41,8 @@ import com.gip.xyna.xact.trigger.HTTPTriggerConnection.Method;
 import com.gip.xyna.xact.trigger.SocketNotAvailableException;
 import com.gip.xyna.xfmg.exceptions.XFMG_DuplicateSessionException;
 import com.gip.xyna.xfmg.xopctrl.managedsessions.SessionCredentials;
-import com.gip.xyna.xfmg.xopctrl.usermanagement.Domain;
-import com.gip.xyna.xfmg.xopctrl.usermanagement.DomainType;
 import com.gip.xyna.xfmg.xopctrl.usermanagement.XynaPlainSessionCredentials;
 import com.gip.xyna.xfmg.xopctrl.usermanagement.XynaUserCredentials;
-import com.gip.xyna.xfmg.xopctrl.usermanagement.jwt.JWTDomainSpecificData;
 import com.gip.xyna.xmcp.RMIChannelImpl;
 
 import xmcp.auth.ExternalUserLoginRequest;
@@ -148,23 +143,6 @@ public class ExternalUserLoginAction implements FilterAction {
   public FilterActionInstance act(URLPath url, HTTPTriggerConnection tc) throws XynaException {
     JsonFilterActionInstance jfai = new JsonFilterActionInstance();
     String payload = AuthUtils.insertFqnIfNeeded(tc.getPayload(), "xmcp.auth.ExternalUserLoginRequest");
-
-    // Parse request early so we have the domain name available for the expiry check
-    ExternalUserLoginRequest request = (ExternalUserLoginRequest) Utils.convertJsonToGeneralXynaObjectUsingGuiHttp(payload);
-
-    // Check JWT expiry BEFORE creating a session – gives the user a meaningful redirect instead of a generic error
-    if (loginType == ExternalAuthType.JSON_WEB_TOKEN) {
-      String tokenHeader = tc.getHeader().getProperty(headerName);
-      if (tokenHeader != null) {
-        String token = tokenHeader.replaceFirst("(?i)Bearer\\s+", "");
-        if (ExternalUserInfo.isJwtExpired(token)) {
-          logger.debug("JWT is expired – returning oidcIssuer for re-authentication");
-          String oidcIssuer = getOidcIssuerForDomain(request.getDomain());
-          return replyJwtExpired(jfai, tc, oidcIssuer);
-        }
-      }
-    }
-
     Pair<Boolean, ExternalUserInfo> p = getExternalUserInfoOrFail(jfai, tc);
     if (p.getFirst()) {
       return jfai;
@@ -174,6 +152,9 @@ public class ExternalUserLoginAction implements FilterAction {
       AuthUtils.replyError(tc, jfai, Status.unauthorized, noUserInfoException);
       return jfai;
     }
+
+    //parsing
+    ExternalUserLoginRequest request = (ExternalUserLoginRequest) Utils.convertJsonToGeneralXynaObjectUsingGuiHttp(payload);
 
     //session erzeugen
     boolean force = request.getForce() != null ? request.getForce() : true;
@@ -196,48 +177,6 @@ public class ExternalUserLoginAction implements FilterAction {
     }
 
     return LoginAction.createLoginResponse(jfai, tc, creds, request.getPath(), xmomgui);
-  }
-
-  /**
-   * Returns the first trusted issuer URL configured for the given JWT domain,
-   * or {@code null} if the domain is not found / not a JWT domain.
-   */
-  private static String getOidcIssuerForDomain(String domainName) {
-    if (domainName == null || domainName.isEmpty()) {
-      return null;
-    }
-    try {
-      for (Domain domain : XynaFactory.getInstance().getFactoryManagement().getDomains()) {
-        if (domain.getName().equals(domainName) && domain.getDomainTypeAsEnum() == DomainType.JWT) {
-          JWTDomainSpecificData jwtData = (JWTDomainSpecificData) domain.getDomainSpecificData();
-          List<String> issuers = jwtData.getTrustedIssuers();
-          if (issuers != null && !issuers.isEmpty()) {
-            return issuers.get(0);
-          }
-        }
-      }
-    } catch (Exception e) {
-      logger.warn("Could not determine OIDC issuer for domain '" + domainName + "'", e);
-    }
-    return null;
-  }
-
-  /**
-   * Sends HTTP 401 with JSON body {@code {"jwtExpired":true,"oidcIssuer":"<issuer>"}} so the
-   * frontend can redirect the user to the OIDC authorization endpoint instead of showing a
-   * generic error message.
-   */
-  private static FilterActionInstance replyJwtExpired(JsonFilterActionInstance jfai, HTTPTriggerConnection tc,
-                                                      String oidcIssuer) throws SocketNotAvailableException {
-    JsonBuilder jb = new JsonBuilder();
-    jb.startObject();
-    jb.addBooleanAttribute("jwtExpired", true);
-    if (oidcIssuer != null) {
-      jb.addStringAttribute("oidcIssuer", oidcIssuer);
-    }
-    jb.endObject();
-    jfai.sendJson(tc, Status.unauthorized.getHttpStatus(), jb.toString());
-    return jfai;
   }
 
 

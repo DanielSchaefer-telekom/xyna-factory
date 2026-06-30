@@ -101,43 +101,6 @@ public class ExternalUserInfo {
     }
   }
 
-  /**
-   * Returns true if the JWT's "exp" claim is in the past.
-   * Does NOT verify the signature - only used for a user-friendly early check.
-   */
-  public static boolean isJwtExpired(String jwt) {
-    if (jwt == null || jwt.isEmpty()) {
-      return false;
-    }
-    try {
-      String[] parts = jwt.split("\\.");
-      if (parts.length != 3) {
-        return false;
-      }
-      String payloadJson = new String(java.util.Base64.getUrlDecoder().decode(parts[1]), java.nio.charset.StandardCharsets.UTF_8);
-      String expKey = "\"exp\":";
-      int expIdx = payloadJson.indexOf(expKey);
-      if (expIdx == -1) {
-        return false; // no exp claim means token does not expire
-      }
-      int valueStart = expIdx + expKey.length();
-      while (valueStart < payloadJson.length() && Character.isWhitespace(payloadJson.charAt(valueStart))) {
-        valueStart++;
-      }
-      int valueEnd = valueStart;
-      while (valueEnd < payloadJson.length() && Character.isDigit(payloadJson.charAt(valueEnd))) {
-        valueEnd++;
-      }
-      if (valueStart == valueEnd) {
-        return false;
-      }
-      long expSeconds = Long.parseLong(payloadJson.substring(valueStart, valueEnd));
-      return System.currentTimeMillis() / 1000L > expSeconds;
-    } catch (Exception e) {
-      return false; // if we cannot determine expiry, let the server-side validation decide
-    }
-  }
-
   public static ExternalUserInfo createFromJWT(String jwt) {
     if (jwt == null || jwt.isEmpty()) {
         return null;
