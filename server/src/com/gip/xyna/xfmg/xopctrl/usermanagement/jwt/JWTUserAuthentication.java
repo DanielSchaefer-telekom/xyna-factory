@@ -158,16 +158,28 @@ public class JWTUserAuthentication extends UserAuthentificationMethod {
             return null;
         }
 
+        logger.debug("JWT DEBUG: normalizedRoles = " + normalizedRoles);
+        logger.debug("JWT DEBUG: roleOrder = " + roleOrder);
+        logger.debug("JWT DEBUG: roleOrder is null? " + (roleOrder == null) + ", isEmpty? " + (roleOrder != null && roleOrder.isEmpty()));
+
         if (roleOrder != null && !roleOrder.isEmpty()) {
+            logger.debug("JWT DEBUG: Entering roleOrder matching loop with " + roleOrder.size() + " preferred roles");
             for (String preferredRole : roleOrder) {
+                logger.debug("JWT DEBUG: Checking if normalizedRoles.contains('" + preferredRole + "')");
                 if (normalizedRoles.contains(preferredRole)) {
-                    logger.debug("roleOrder match found (case-sensitive): " + preferredRole);
+                    logger.debug("JWT DEBUG: MATCH FOUND! Returning preferred role: " + preferredRole);
                     return preferredRole;
+                } else {
+                    logger.debug("JWT DEBUG: No match for '" + preferredRole + "'");
                 }
             }
+            logger.debug("JWT DEBUG: No role from roleOrder matched in normalizedRoles");
+        } else {
+            logger.debug("JWT DEBUG: roleOrder is null or empty, using fallback");
         }
 
         // fallback: use first role found in token.
+        logger.debug("JWT DEBUG: Using fallback (first role): " + normalizedRoles.get(0));
         return normalizedRoles.get(0);
     }
 

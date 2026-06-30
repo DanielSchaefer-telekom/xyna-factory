@@ -206,9 +206,11 @@ public enum DomainType {
         List<String> cleanedRoleOrder = new ArrayList<String>();
         for (String role : roleOrder) {
           if (role != null) {
-            String trimmedRole = role.trim();
-            if (!trimmedRole.isEmpty()) {
-              cleanedRoleOrder.add(trimmedRole);
+            for (String part : role.split(",")) {
+              String trimmedRole = part.trim();
+              if (!trimmedRole.isEmpty()) {
+                cleanedRoleOrder.add(trimmedRole);
+              }
             }
           }
         }
