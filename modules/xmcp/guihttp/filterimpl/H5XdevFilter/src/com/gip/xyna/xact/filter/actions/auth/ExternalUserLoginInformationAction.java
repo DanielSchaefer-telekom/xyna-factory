@@ -20,6 +20,7 @@ package com.gip.xyna.xact.filter.actions.auth;
 
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 
 import com.gip.xyna.XynaFactory;
@@ -38,7 +39,7 @@ import com.gip.xyna.xfmg.xopctrl.usermanagement.DomainType;
 
 
 /**
- * http (reverse) proxy schickt client zertifikat als payload an xyna. z.b. könnte das der apache machen.
+ * http (reverse) proxy schickt client zertifikat als payload an xyna. z.b. kï¿½nnte das der apache machen.
  * vgl https://tomcat.apache.org/tomcat-8.5-doc/api/org/apache/catalina/valves/SSLValve.html (beschreibung, wie das im tomcat terminiert)
  * 
  * beispiel request:
@@ -73,7 +74,7 @@ Connection: Keep-Alive
  * Response wenn kein Zert vorhanden:
  * {}
  * 
- * Response bei ungültigem Zert:
+ * Response bei ungï¿½ltigem Zert:
  * <Error-Response>
  * 
  */
@@ -83,6 +84,7 @@ public class ExternalUserLoginInformationAction implements FilterAction {
   private static final String USERNAME = "username";
   private static final String DISPLAY_NAME = "userdisplayname";
   private static final String EXTERNAL_DOMAINS = "externaldomains";
+  private static final String AVAILABLE_ROLES = "availableRoles";
 
 
   public boolean match(URLPath url, Method method) {
@@ -115,6 +117,12 @@ public class ExternalUserLoginInformationAction implements FilterAction {
       }
     }
     jb.addStringListAttribute(EXTERNAL_DOMAINS, domains);
+
+    List<String> availableRoles = Collections.emptyList();
+    if (!domains.isEmpty()) {
+      availableRoles = ExternalUserLoginAction.resolveAvailableRoles(domains.get(0), eui);
+    }
+    jb.addStringListAttribute(AVAILABLE_ROLES, availableRoles);
     jb.endObject();
 
     jfai.sendJson(tc, jb.toString());

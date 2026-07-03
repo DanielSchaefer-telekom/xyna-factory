@@ -34,4 +34,9 @@
       <Type>String</Type>
     </Meta>
   </Data>
+  <Data Label="Selected Role" VariableName="selectedRole">
+    <Meta>
+      <Type>String</Type>
+    </Meta>
+  </Data>
 </DataType>

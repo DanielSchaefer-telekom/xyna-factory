@@ -21,6 +21,9 @@ package com.gip.xyna.xact.filter.actions.auth;
 
 import java.rmi.RemoteException;
 import java.security.cert.CertificateException;
+import java.util.Collections;
+import java.util.List;
+
 import org.apache.log4j.Logger;
 
 import com.gip.xyna.CentralFactoryLogging;
@@ -41,8 +44,13 @@ import com.gip.xyna.xact.trigger.HTTPTriggerConnection.Method;
 import com.gip.xyna.xact.trigger.SocketNotAvailableException;
 import com.gip.xyna.xfmg.exceptions.XFMG_DuplicateSessionException;
 import com.gip.xyna.xfmg.xopctrl.managedsessions.SessionCredentials;
+import com.gip.xyna.xfmg.xopctrl.usermanagement.Domain;
+import com.gip.xyna.xfmg.xopctrl.usermanagement.DomainType;
 import com.gip.xyna.xfmg.xopctrl.usermanagement.XynaPlainSessionCredentials;
 import com.gip.xyna.xfmg.xopctrl.usermanagement.XynaUserCredentials;
+import com.gip.xyna.xfmg.xopctrl.usermanagement.jwt.JWTDomainSpecificData;
+import com.gip.xyna.xfmg.xopctrl.usermanagement.jwt.JWTUserAuthentication;
+import com.gip.xyna.xnwh.persistence.PersistenceLayerException;
 import com.gip.xyna.xmcp.RMIChannelImpl;
 
 import xmcp.auth.ExternalUserLoginRequest;
@@ -56,10 +64,10 @@ import xmcp.auth.ExternalUserLoginRequest;
  * "force":"true"
  * "domain":"<domainname>"
  * }
- * 
+ *
  * antwort:
  * so wie beim login, nur dass die sessionerzeugung �ber die externe domain passiert
- * 
+ *
  */
 public class ExternalUserLoginAction implements FilterAction {
 
@@ -70,6 +78,9 @@ public class ExternalUserLoginAction implements FilterAction {
   private static final Exception noUserInfoException = new Exception("No user info provided");
   private static final Exception notAuthorizedException = new Exception("Session could not be authorized.");
   private static final Exception internalServerError = new Exception("Internal Server Error");
+  private static final Exception selectedRoleInvalidException = new Exception("Selected role is not valid for this user.");
+
+
   static {
     noUserInfoException.setStackTrace(new StackTraceElement[0]);
     notAuthorizedException.setStackTrace(new StackTraceElement[0]);
@@ -118,7 +129,8 @@ public class ExternalUserLoginAction implements FilterAction {
       ExternalUserInfo eui;
       switch (loginType) {
         case JSON_WEB_TOKEN:
-          eui = ExternalUserInfo.createFromJWT(header.replaceFirst("Bearer\\s+", ""));
+          String jwtHeader = header == null ? null : header.replaceFirst("Bearer\\s+", "");
+          eui = ExternalUserInfo.createFromJWT(jwtHeader);
           break;
         case CLIENT_CERT:
         default:
@@ -155,18 +167,34 @@ public class ExternalUserLoginAction implements FilterAction {
 
     //parsing
     ExternalUserLoginRequest request = (ExternalUserLoginRequest) Utils.convertJsonToGeneralXynaObjectUsingGuiHttp(payload);
+    String selectedRole = extractSelectedRole(payload);
+    String domainName = request.getDomain();
+
+    // Wenn eine Rolle explizit gesendet wurde: stateless gegen die live berechnete Liste validieren.
+    // Wurde keine Rolle gesendet: bisheriger Pfad – JWTUserAuthentication wählt selbst (roleOrder/default).
+    if (selectedRole != null) {
+      List<String> availableRoles = resolveAvailableRoles(domainName, eui);
+      if (!availableRoles.isEmpty() && !availableRoles.contains(selectedRole)) {
+        AuthUtils.replyError(tc, jfai, Status.unauthorized, selectedRoleInvalidException);
+        return jfai;
+      }
+    }
 
     //session erzeugen
     boolean force = request.getForce() != null ? request.getForce() : true;
-    String domainName = request.getDomain();
     SessionCredentials creds = XynaFactory.getInstance().getFactoryManagement()
         .createSession(new XynaUserCredentials(eui.externalUserName, ""), Optional.<String> empty(), force);
 
     //session fremd-authorisieren
     try {
-      if (!new RMIChannelImpl().authorizeSession(new XynaUserCredentials(eui.externalUserName, eui.externalUserPassword), domainName,
-                                                 new XynaPlainSessionCredentials(creds.getSessionId(), creds.getToken()))) {
-        return error(creds, tc, jfai);
+      JWTUserAuthentication.setSelectedRoleOverride(selectedRole);
+      try {
+        if (!new RMIChannelImpl().authorizeSession(new XynaUserCredentials(eui.externalUserName, eui.externalUserPassword), domainName,
+                                                   new XynaPlainSessionCredentials(creds.getSessionId(), creds.getToken()))) {
+          return error(creds, tc, jfai);
+        }
+      } finally {
+        JWTUserAuthentication.clearSelectedRoleOverride();
       }
     } catch (RemoteException e) {
       if (e.getMessage().contains("XYNA-04049")) {
@@ -202,6 +230,65 @@ public class ExternalUserLoginAction implements FilterAction {
   @Override
   public boolean hasIndexPageChanged() {
     return false;
+  }
+
+
+  public static List<String> resolveAvailableRoles(String domainName, ExternalUserInfo eui) {
+    if (eui == null || eui.externalUserPassword == null || loginType != ExternalAuthType.JSON_WEB_TOKEN) {
+      return Collections.emptyList();
+    }
+    Domain domain = getDomain(domainName);
+    if (domain == null || domain.getDomainTypeAsEnum() != DomainType.JWT
+        || !(domain.getDomainSpecificData() instanceof JWTDomainSpecificData)) {
+      return Collections.emptyList();
+    }
+    JWTDomainSpecificData dsd = (JWTDomainSpecificData) domain.getDomainSpecificData();
+    try {
+      return new JWTUserAuthentication(dsd).resolveAvailableRoles(eui.externalUserPassword);
+    } catch (Exception e) {
+      logger.debug("Could not resolve available roles for external JWT login", e);
+      return Collections.emptyList();
+    }
+  }
+
+
+  private static Domain getDomain(String domainName) {
+    if (domainName == null || domainName.isEmpty()) {
+      return null;
+    }
+    try {
+      for (Domain domain : XynaFactory.getInstance().getFactoryManagement().getDomains()) {
+        if (domainName.equals(domain.getName())) {
+          return domain;
+        }
+      }
+    } catch (PersistenceLayerException e) {
+      logger.debug("Could not load domains for external login", e);
+    }
+    return null;
+  }
+
+
+  private static String extractSelectedRole(String payload) {
+    if (payload == null || payload.isEmpty()) {
+      return null;
+    }
+    String roleKey = "\"selectedRole\"";
+    int keyStart = payload.indexOf(roleKey);
+    if (keyStart < 0) {
+      return null;
+    }
+    int valueStart = payload.indexOf('"', keyStart + roleKey.length());
+    if (valueStart < 0) {
+      return null;
+    }
+    valueStart += 1;
+    int valueEnd = payload.indexOf('"', valueStart);
+    if (valueEnd < 0) {
+      return null;
+    }
+    String selectedRole = payload.substring(valueStart, valueEnd).trim();
+    return selectedRole.isEmpty() ? null : selectedRole;
   }
 
 
